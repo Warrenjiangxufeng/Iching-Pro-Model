@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.idea/
+.vscode/
+venv/
+.venv/
+data/
+models/*.pt
+models/*.json
+markets_generated.py
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini
