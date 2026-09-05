@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from config import SYMBOLS, MODEL_DIR, DATA_DIR, EPOCHS, LR, SEED, MARKETS, MARKET_KIND
+from config import SYMBOLS, MODEL_DIR, DATA_DIR, EPOCHS, LR, SEED, MARKETS, MARKET_KIND, FEAT
 from exp_iching_seq import (
     N_CTX, build_tokens, make_windows, Net, train,
     marg_day, predict, eval_win, load_prices,
@@ -81,7 +81,7 @@ def _prepare_data(symbols, demo=False):
     wins = []
     win_dir = Path("data") / "win"
     for name, s, kind in symbols:
-        win_path = win_dir / f"{s}.npz"
+        win_path = win_dir / f"{s}_f{FEAT}.npz"
         # 缓存命中：直接读窗口
         if win_path.exists():
             try:
