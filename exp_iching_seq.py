@@ -32,7 +32,7 @@ from iching_yao import yao_strength
 from config import (
     BLOCK, NUM, N_CTX, EMB, FEAT, SEED, EPOCHS, LR, BATCH, MARKET_KIND,
     GPT_D_MODEL, GPT_NHEAD, GPT_NLAYERS, GPT_DIM_FF, GPT_DROPOUT, GPT_NORM_EPS,
-    GPT_LR, GPT_GRAD_CLIP, USE_STRUCT, USE_YAO, USE_CLASS_WEIGHT, USE_FOCAL,
+    GPT_LR, GPT_GRAD_CLIP, USE_STRUCT, USE_YAO, YAO_Q, USE_CLASS_WEIGHT, USE_FOCAL,
     LABEL_SMOOTHING, FOCAL_GAMMA,
 )
 
@@ -107,7 +107,7 @@ def build_tokens(df):
         if USE_YAO:
             j = s + BLOCK - 1
             # 用『截至块末』的历史算爻力度（老/少），不做未来泄漏
-            ystr = yao_strength(close_all[:j + 1], s, BLOCK)
+            ystr = yao_strength(close_all[:j + 1], s, BLOCK, q=YAO_Q)
             feats[-1].extend([float(v) for v in ystr])
     return np.asarray(tokens, dtype=np.int64), np.asarray(feats, dtype=np.float32)
 

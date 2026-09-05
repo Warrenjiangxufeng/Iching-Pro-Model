@@ -26,29 +26,31 @@ def _returns(close):
     return r
 
 
-def yao_threshold(close, q=0.75):
+def yao_threshold(close, q=None):
     """该品种『老/强』阈值 = 当根涨跌幅绝对值的 q 分位。"""
+    if q is None:
+        q = 0.75
     r = _returns(close)
     a = np.abs(r[1:])
     return float(np.quantile(a, q)) if len(a) else 0.0
 
 
-def yao_strength(close, s, block=6, thresh=None):
+def yao_strength(close, s, block=6, thresh=None, q=None):
     """第 s 天起连续 block 根的『爻力度』(0~1)。1=达到老/强阈值。"""
     r = _returns(close)
     if thresh is None:
-        thresh = yao_threshold(close)
+        thresh = yao_threshold(close, q)
     seg = np.abs(r[s:s + block])
     if thresh > 0:
         return np.clip(seg / thresh, 0.0, 1.0).astype(np.float32)
     return np.zeros(block, dtype=np.float32)
 
 
-def yao_4state(yang_bits, close, s, block=6, thresh=None):
+def yao_4state(yang_bits, close, s, block=6, thresh=None, q=None):
     """每爻四象：0=少阴 1=少阳 2=老阴 3=老阳。"""
     r = _returns(close)
     if thresh is None:
-        thresh = yao_threshold(close)
+        thresh = yao_threshold(close, q)
     seg = r[s:s + block]
     out = []
     for i, y in enumerate([int(v) for v in yang_bits]):
