@@ -80,7 +80,11 @@ BLOCK = 6            # 6 日不重叠 -> 1 卦 token
 NUM = 64            # 卦 token 总数
 N_CTX = 20          # 上下文 token 数（约 120 天）
 EMB = 16            # embedding 维度
-FEAT = 8            # 每 token 连续特征维（3 基础 + 5 技术/形态）
+
+# ---- 爻级强弱（以爻记录每根 K 线强度，替代 RSI/量能等外部指标）----
+USE_YAO = True        # 每卦的 6 爻按『阴阳 + 力度(老/少)』记录强弱
+YAO_DIM = 6           # 6 爻 -> 6 维爻力度(0~1)；1 表示老阳/老阴(强到动)
+FEAT = 3 + (YAO_DIM if USE_YAO else 0)   # 3 基础(ret/vol/last) + 爻强度
 
 # ---- 结构注入（错/综/互/文王序/上下卦）----
 USE_STRUCT = True     # 是否把易经结构特征加到 token embedding

@@ -27,11 +27,12 @@ import torch.nn as nn
 
 from iching import HEXAGRAMS, BY_BITS
 from iching_structure import STRUCT_DIM, STRUCT_TABLE
+from iching_yao import yao_strength
 
 from config import (
     BLOCK, NUM, N_CTX, EMB, FEAT, SEED, EPOCHS, LR, BATCH, MARKET_KIND,
     GPT_D_MODEL, GPT_NHEAD, GPT_NLAYERS, GPT_DIM_FF, GPT_DROPOUT, GPT_NORM_EPS,
-    GPT_LR, GPT_GRAD_CLIP, USE_STRUCT, USE_CLASS_WEIGHT, USE_FOCAL,
+    GPT_LR, GPT_GRAD_CLIP, USE_STRUCT, USE_YAO, USE_CLASS_WEIGHT, USE_FOCAL,
     LABEL_SMOOTHING, FOCAL_GAMMA,
 )
 
@@ -81,28 +82,13 @@ def yang_series(df):
         .fillna(False).astype(int).to_numpy()
 
 
-def _rsi(close, n=6):
-    delta = np.diff(close, prepend=close[0:1])
-    gain = np.where(delta > 0, delta, 0.0).astype(float)
-    loss = np.where(delta < 0, -delta, 0.0).astype(float)
-    ag = pd.Series(gain).rolling(n, min_periods=1).mean().to_numpy()
-    al = pd.Series(loss).rolling(n, min_periods=1).mean().to_numpy()
-    rs = ag / (al + 1e-9)
-    return 100.0 - 100.0 / (1.0 + rs)
-
-
 def build_tokens(df):
-    """不重叠 6 日块 -> 卦 token 序列 + 每块连续特征。"""
+    """不重叠 6 日块 -> 卦 token 序列 + 每块特征。
+    特征：3 基础(ret/vol/last) + 6 爻力度(以『爻』记录每根 K 线强弱，老/少)。"""
     yang = yang_series(df)
     n = len(yang)
     nb = (n - BLOCK + 1) // BLOCK
     close_all = df["close"].astype(float).to_numpy()
-    high = df["high"].astype(float).to_numpy() if "high" in df else close_all
-    low = df["low"].astype(float).to_numpy() if "low" in df else close_all
-    volume = df["volume"].astype(float).to_numpy() if "volume" in df else np.ones(len(df))
-    ma20 = pd.Series(close_all).rolling(20, min_periods=1).mean().to_numpy()
-    vma20 = pd.Series(volume).rolling(20, min_periods=1).mean().to_numpy()
-    rsi6 = _rsi(close_all, 6)
     tokens, feats = [], []
     for k in range(nb):
         s = k * BLOCK
@@ -116,13 +102,13 @@ def build_tokens(df):
         logret = np.diff(np.log(close)) if len(close) > 1 else np.array([0.0])
         vol = float(np.std(logret)) if len(logret) > 1 else 0.0
         last = (close[-1] / close[-2] - 1) if len(close) > 1 else 0.0
-        j = s + BLOCK - 1
-        ma_dev = (close_all[j] / ma20[j] - 1.0) if ma20[j] > 0 else 0.0
-        vol_rel = (volume[j] / vma20[j] - 1.0) if vma20[j] > 0 else 0.0
-        ampl = (high[j] - low[j]) / close_all[j] if close_all[j] > 0 else 0.0
-        slope = float(np.polyfit(np.arange(BLOCK), close, 1)[0]) / (close[-1] + 1e-9)
         tokens.append(h["value"])
-        feats.append([ret, vol, last, ma_dev, float(rsi6[j]), vol_rel, ampl, slope])
+        feats.append([ret, vol, last])
+        if USE_YAO:
+            j = s + BLOCK - 1
+            # 用『截至块末』的历史算爻力度（老/少），不做未来泄漏
+            ystr = yao_strength(close_all[:j + 1], s, BLOCK)
+            feats[-1].extend([float(v) for v in ystr])
     return np.asarray(tokens, dtype=np.int64), np.asarray(feats, dtype=np.float32)
 
 
