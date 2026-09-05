@@ -28,11 +28,12 @@ import torch.nn as nn
 from iching import HEXAGRAMS, BY_BITS
 from iching_structure import STRUCT_DIM, STRUCT_TABLE
 from iching_yao import yao_strength
+from iching_time import time_features
 
 from config import (
     BLOCK, NUM, N_CTX, EMB, FEAT, SEED, EPOCHS, LR, BATCH, MARKET_KIND,
     GPT_D_MODEL, GPT_NHEAD, GPT_NLAYERS, GPT_DIM_FF, GPT_DROPOUT, GPT_NORM_EPS,
-    GPT_LR, GPT_GRAD_CLIP, USE_STRUCT, USE_YAO, YAO_Q, USE_CLASS_WEIGHT, USE_FOCAL,
+    GPT_LR, GPT_GRAD_CLIP, USE_STRUCT, USE_YAO, YAO_Q, USE_TIME, USE_CLASS_WEIGHT, USE_FOCAL,
     LABEL_SMOOTHING, FOCAL_GAMMA,
 )
 
@@ -89,6 +90,7 @@ def build_tokens(df):
     n = len(yang)
     nb = (n - BLOCK + 1) // BLOCK
     close_all = df["close"].astype(float).to_numpy()
+    dates = df["date"].astype(str).str[:10].to_numpy() if "date" in df else None
     tokens, feats = [], []
     for k in range(nb):
         s = k * BLOCK
@@ -104,11 +106,14 @@ def build_tokens(df):
         last = (close[-1] / close[-2] - 1) if len(close) > 1 else 0.0
         tokens.append(h["value"])
         feats.append([ret, vol, last])
+        j = s + BLOCK - 1
         if USE_YAO:
-            j = s + BLOCK - 1
             # 用『截至块末』的历史算爻力度（老/少），不做未来泄漏
             ystr = yao_strength(close_all[:j + 1], s, BLOCK, q=YAO_Q)
             feats[-1].extend([float(v) for v in ystr])
+        if USE_TIME and dates is not None:
+            tv = time_features(dates[j])
+            feats[-1].extend([float(v) for v in tv])
     return np.asarray(tokens, dtype=np.int64), np.asarray(feats, dtype=np.float32)
 
 

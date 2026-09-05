@@ -85,7 +85,11 @@ EMB = 16            # embedding 维度
 USE_YAO = True        # 每卦的 6 爻按『阴阳 + 力度(老/少)』记录强弱
 YAO_DIM = 6           # 6 爻 -> 6 维爻力度(0~1)；1 表示老阳/老阴(强到动)
 YAO_Q = 0.75          # 爻『老/强』门槛分位(0~1)：|涨跌幅| 达该历史分位即视为老/动
-FEAT = 3 + (YAO_DIM if USE_YAO else 0)   # 3 基础(ret/vol/last) + 爻强度
+
+# ---- 时间概念：干支纪时（年/月/日干支 + 节令），让每个卦有时间 --
+USE_TIME = True       # 把每根 K 线日期转成干支纪时特征
+TIME_DIM = 8          # 年干支/月干/月支/日干支/月/日/年分日/季节
+FEAT = 3 + (YAO_DIM if USE_YAO else 0) + (TIME_DIM if USE_TIME else 0)  # 3 基础 + 爻强度 + 时间
 
 # ---- 结构注入（错/综/互/文王序/上下卦）----
 USE_STRUCT = True     # 是否把易经结构特征加到 token embedding
