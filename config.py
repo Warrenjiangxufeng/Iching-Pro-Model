@@ -43,6 +43,8 @@ MARKETS = [
     ("沪深300", "000300", "index"),
     ("上证指数", "000001", "index"),
     ("创业板指", "399006", "index"),
+    ("美豆", "S", "futures"),
+    ("美原油", "CL", "futures"),
     # ===== 追加区：新品类写这里，格式 ("名称","代码","类型")，逗号结尾 =====
 ]
 
@@ -102,6 +104,10 @@ LABEL_SMOOTHING = 0.10    # 标签平滑（对长尾多分类更稳）
 FOCAL_GAMMA = 2.0
 
 SEED = 42
+SEEDS = [42, 43, 44]      # 多 seed：做多次训练平均，看真实泛化(而非靠单次运气)
+VAL_FRAC = 0.10           # walk-forward：训练段尾部再切一部分做验证(早停用)
+TEST_FRAC = 0.20          # walk-forward：每品种末尾留出的真正样本外测试
+EARLY_PATIENCE = 5        # 早停：验证集 loss 连续 n 轮不降即停
 EPOCHS = 80
 LR = 1e-3           # 备用学习率（Transformer 实际用 GPT_LR）
 BATCH = 64
@@ -115,6 +121,7 @@ GPT_DROPOUT = 0.1
 GPT_NORM_EPS = 1e-5
 GPT_LR = 3e-4          # 学习率（默认 1e-3 易发散为 nan）
 GPT_GRAD_CLIP = 1.0    # 梯度裁剪范数，防数值爆炸
+WEIGHT_DECAY = 1e-4    # Adam 权重衰减（降过拟合）
 
 # ---- 模型/数据路径（相对本项目）----
 MODEL_DIR = "models"
