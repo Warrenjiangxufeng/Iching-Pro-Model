@@ -80,7 +80,18 @@ BLOCK = 6            # 6 日不重叠 -> 1 卦 token
 NUM = 64            # 卦 token 总数
 N_CTX = 20          # 上下文 token 数（约 120 天）
 EMB = 16            # embedding 维度
-FEAT = 3            # 每 token 连续特征维
+FEAT = 8            # 每 token 连续特征维（3 基础 + 5 技术/形态）
+
+# ---- 结构注入（错/综/互/文王序/上下卦）----
+USE_STRUCT = True     # 是否把易经结构特征加到 token embedding
+STRUCT_DIM = 7        # 结构特征维（对应 iching_structure.STRUCT_DIM）
+
+# ---- 拉平长尾 / 难样本 / 软化标签（治 64 卦不均衡）----
+USE_CLASS_WEIGHT = True   # 按卦出现频率给类别加权
+USE_FOCAL = False         # 用 focal loss 聚焦难样本（默认关，先验证类权+软化）
+LABEL_SMOOTHING = 0.10    # 标签平滑（对长尾多分类更稳）
+FOCAL_GAMMA = 2.0
+
 SEED = 42
 EPOCHS = 80
 LR = 1e-3           # 备用学习率（Transformer 实际用 GPT_LR）

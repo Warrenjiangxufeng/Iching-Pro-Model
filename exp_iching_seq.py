@@ -26,11 +26,13 @@ import torch
 import torch.nn as nn
 
 from iching import HEXAGRAMS, BY_BITS
+from iching_structure import STRUCT_DIM, STRUCT_TABLE
 
 from config import (
     BLOCK, NUM, N_CTX, EMB, FEAT, SEED, EPOCHS, LR, BATCH, MARKET_KIND,
     GPT_D_MODEL, GPT_NHEAD, GPT_NLAYERS, GPT_DIM_FF, GPT_DROPOUT, GPT_NORM_EPS,
-    GPT_LR, GPT_GRAD_CLIP,
+    GPT_LR, GPT_GRAD_CLIP, USE_STRUCT, USE_CLASS_WEIGHT, USE_FOCAL,
+    LABEL_SMOOTHING, FOCAL_GAMMA,
 )
 
 
@@ -79,11 +81,28 @@ def yang_series(df):
         .fillna(False).astype(int).to_numpy()
 
 
+def _rsi(close, n=6):
+    delta = np.diff(close, prepend=close[0:1])
+    gain = np.where(delta > 0, delta, 0.0).astype(float)
+    loss = np.where(delta < 0, -delta, 0.0).astype(float)
+    ag = pd.Series(gain).rolling(n, min_periods=1).mean().to_numpy()
+    al = pd.Series(loss).rolling(n, min_periods=1).mean().to_numpy()
+    rs = ag / (al + 1e-9)
+    return 100.0 - 100.0 / (1.0 + rs)
+
+
 def build_tokens(df):
     """不重叠 6 日块 -> 卦 token 序列 + 每块连续特征。"""
     yang = yang_series(df)
     n = len(yang)
     nb = (n - BLOCK + 1) // BLOCK
+    close_all = df["close"].astype(float).to_numpy()
+    high = df["high"].astype(float).to_numpy() if "high" in df else close_all
+    low = df["low"].astype(float).to_numpy() if "low" in df else close_all
+    volume = df["volume"].astype(float).to_numpy() if "volume" in df else np.ones(len(df))
+    ma20 = pd.Series(close_all).rolling(20, min_periods=1).mean().to_numpy()
+    vma20 = pd.Series(volume).rolling(20, min_periods=1).mean().to_numpy()
+    rsi6 = _rsi(close_all, 6)
     tokens, feats = [], []
     for k in range(nb):
         s = k * BLOCK
@@ -97,8 +116,13 @@ def build_tokens(df):
         logret = np.diff(np.log(close)) if len(close) > 1 else np.array([0.0])
         vol = float(np.std(logret)) if len(logret) > 1 else 0.0
         last = (close[-1] / close[-2] - 1) if len(close) > 1 else 0.0
+        j = s + BLOCK - 1
+        ma_dev = (close_all[j] / ma20[j] - 1.0) if ma20[j] > 0 else 0.0
+        vol_rel = (volume[j] / vma20[j] - 1.0) if vma20[j] > 0 else 0.0
+        ampl = (high[j] - low[j]) / close_all[j] if close_all[j] > 0 else 0.0
+        slope = float(np.polyfit(np.arange(BLOCK), close, 1)[0]) / (close[-1] + 1e-9)
         tokens.append(h["value"])
-        feats.append([ret, vol, last])
+        feats.append([ret, vol, last, ma_dev, float(rsi6[j]), vol_rel, ampl, slope])
     return np.asarray(tokens, dtype=np.int64), np.asarray(feats, dtype=np.float32)
 
 
@@ -195,6 +219,10 @@ class _TransformerNet(nn.Module):
         self.d_model = d_model
         self.n_ctx = N_CTX
         self.emb = nn.Embedding(NUM, EMB)
+        # 易经结构注入：错/综/互/文王序/上下卦 -> 结构向量，叠加到卦 embedding
+        self.struct_emb = nn.Linear(STRUCT_DIM, EMB) if USE_STRUCT else None
+        if USE_STRUCT:
+            self.register_buffer("struct_table", torch.from_numpy(STRUCT_TABLE).float(), persistent=False)
         self.feat_proj = nn.Linear(FEAT, d_model - EMB) if d_model > EMB else nn.Identity()
         self.layers = nn.ModuleList([
             _GPTLayer(d_model, nhead, dim_ff, dropout) for _ in range(nlayers)
@@ -211,6 +239,9 @@ class _TransformerNet(nn.Module):
     def forward(self, xt, xf):
         L = xt.size(1)
         e = self.emb(xt)                       # (B, L, EMB)
+        if USE_STRUCT:
+            se = self.struct_emb(self.struct_table[xt])   # (B, L, EMB)
+            e = e + se
         fp = self.feat_proj(xf)                # (B, L, d_model-EMB)
         x = torch.cat([e, fp], dim=-1)         # (B, L, d_model)
         x = _apply_rope(x, self.cos[:L], self.sin[:L])   # RoPE 位置编码
@@ -227,6 +258,18 @@ def Net():
     return _TransformerNet()
 
 
+def _focal(out, y, weight=None, gamma=2.0):
+    """focal loss：聚焦模型总猜错的样本（长尾/难样本）。"""
+    import torch.nn.functional as F
+    logp = F.log_softmax(out, dim=1)
+    logpt = logp.gather(1, y.unsqueeze(1)).squeeze(1)
+    pt = logpt.exp()
+    w = (1.0 - pt) ** gamma
+    if weight is not None:
+        w = w * weight[y]
+    return -(w * logpt).mean()
+
+
 def train(win, epochs=EPOCHS, lr=LR, seed=SEED):
     torch.manual_seed(seed)
     xt = torch.tensor(win[0], dtype=torch.long)
@@ -235,7 +278,17 @@ def train(win, epochs=EPOCHS, lr=LR, seed=SEED):
     model = Net()
     # Transformer 用较小学习率 + 梯度裁剪，避免数值发散成 nan
     opt = torch.optim.Adam(model.parameters(), lr=GPT_LR)
-    lossf = nn.CrossEntropyLoss()
+    # 类别加权（拉平 64 卦长尾）：低频卦权重高，逼模型学会冷门卦
+    cls_w = None
+    if USE_CLASS_WEIGHT:
+        freq = np.bincount(y.numpy(), minlength=NUM).astype(np.float64)
+        inv = 1.0 / (freq + 1.0)
+        inv = inv / inv.sum() * NUM
+        cls_w = torch.tensor(inv, dtype=torch.float32)
+    if USE_FOCAL:
+        lossf = lambda o, yy: _focal(o, yy, weight=cls_w, gamma=FOCAL_GAMMA)
+    else:
+        lossf = nn.CrossEntropyLoss(weight=cls_w, label_smoothing=LABEL_SMOOTHING)
     n = len(y)
     for ep in range(epochs):
         model.train()
